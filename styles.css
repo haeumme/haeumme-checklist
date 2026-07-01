@@ -18,11 +18,8 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   background: var(--bg);
   color: var(--ink);
-  height: 100vh;
-  overflow: hidden;
-  padding: 16px 16px 12px;
-  display: flex;
-  flex-direction: column;
+  min-height: 100vh;
+  padding: 22px 18px 44px;
   -webkit-font-smoothing: antialiased;
   touch-action: manipulation;
 }
@@ -31,10 +28,6 @@ body {
   max-width: 1180px;
   width: 100%;
   margin: 0 auto;
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
 }
 
 /* Sign-in screen */
@@ -234,10 +227,8 @@ body {
 /* Board grid */
 .board {
   display: grid;
-  grid-template-columns: repeat(8, 1fr);
-  gap: 12px;
-  flex: 1;
-  min-height: 0;
+  grid-template-columns: repeat(4, 1fr); /* 4 on top, 4 on bottom */
+  gap: 16px;
 }
 
 .day {
@@ -245,11 +236,10 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  padding: 14px 12px;
+  padding: 16px 14px;
   display: flex;
   flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
+  min-height: 175px;
 }
 
 .day--today {
@@ -281,7 +271,8 @@ body {
   margin-bottom: 4px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 6px;
 }
 .day__today-tag {
   font-size: 0.62rem;
@@ -299,9 +290,6 @@ body {
   flex-direction: column;
   gap: 7px;
   flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding-right: 2px;
 }
 
 .task {
@@ -443,14 +431,12 @@ body {
 
 .app__footer { text-align: center; color: var(--muted); font-size: 0.85rem; margin-top: 28px; font-weight: 600; }
 
-/* Tablet & phone: let the page scroll naturally instead of cramming one screen */
-@media (max-width: 900px) {
-  body { height: auto; overflow: visible; display: block; padding: 24px 16px 40px; }
-  .app { height: auto; display: block; }
+/* Tablet: 2 across */
+@media (max-width: 760px) {
   .board { grid-template-columns: repeat(2, 1fr); }
-  .day { overflow: visible; }
-  .tasks { overflow: visible; }
 }
-@media (max-width: 560px) {
+/* Small phones: single column */
+@media (max-width: 420px) {
   .board { grid-template-columns: 1fr; }
+  .day { min-height: auto; }
 }
