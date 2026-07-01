@@ -57,6 +57,12 @@ const signupBtn = document.getElementById("signupBtn");
 const signupHint = document.getElementById("signupHint");
 const toLoginFromSignup = document.getElementById("toLoginFromSignup");
 
+const toManage = document.getElementById("toManage");
+const viewManage = document.getElementById("viewManage");
+const accountsList = document.getElementById("accountsList");
+const manageHint = document.getElementById("manageHint");
+const toLoginFromManage = document.getElementById("toLoginFromManage");
+
 const fgUser = document.getElementById("fgUser");
 const fgBackup = document.getElementById("fgBackup");
 const fgPass = document.getElementById("fgPass");
@@ -130,9 +136,71 @@ function showView(which) {
   viewLogin.hidden = which !== "login";
   viewSignup.hidden = which !== "signup";
   viewForgot.hidden = which !== "forgot";
+  viewManage.hidden = which !== "manage";
   setHint(loginHint, "");
   setHint(signupHint, "");
   setHint(forgotHint, "");
+  setHint(manageHint, "");
+  if (which === "manage") renderAccounts();
+}
+
+// --- Manage accounts (delete the ones you choose) ---
+function renderAccounts() {
+  const profiles = loadProfiles();
+  const keys = Object.keys(profiles);
+  accountsList.innerHTML = "";
+
+  if (keys.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "accounts__empty";
+    empty.textContent = "No accounts saved on this device yet.";
+    accountsList.appendChild(empty);
+    return;
+  }
+
+  keys.forEach((key) => {
+    const prof = profiles[key];
+    const row = document.createElement("div");
+    row.className = "account";
+
+    const info = document.createElement("div");
+    info.className = "account__info";
+    const nm = document.createElement("div");
+    nm.className = "account__name";
+    nm.textContent = prof.name;
+    const un = document.createElement("div");
+    un.className = "account__user";
+    un.textContent = "@" + prof.username;
+    info.appendChild(nm);
+    info.appendChild(un);
+
+    const del = document.createElement("button");
+    del.className = "account__del";
+    del.type = "button";
+    del.textContent = "Delete";
+    del.addEventListener("click", () => deleteAccount(key, prof));
+
+    row.appendChild(info);
+    row.appendChild(del);
+    accountsList.appendChild(row);
+  });
+}
+
+function deleteAccount(key, prof) {
+  if (!confirm('Delete "' + prof.name + '" (@' + prof.username + ')?\nThis erases their checklist on this device and cannot be undone.')) return;
+
+  const profiles = loadProfiles();
+  delete profiles[key];
+  saveProfiles(profiles);
+  try {
+    localStorage.removeItem(dataKeyFor(key));
+    localStorage.removeItem(recipientKeyFor(key));
+    if (localStorage.getItem(CURRENT_KEY) === key) localStorage.removeItem(CURRENT_KEY);
+    if (localStorage.getItem(LAST_USER_KEY) === prof.username) localStorage.removeItem(LAST_USER_KEY);
+  } catch (e) {}
+
+  setHint(manageHint, "Deleted “" + prof.name + ".”", true);
+  renderAccounts();
 }
 
 // --- Log in ---
@@ -562,8 +630,10 @@ loginUser.addEventListener("keydown", (e) => { if (e.key === "Enter") loginPass.
 
 toSignup.addEventListener("click", () => showView("signup"));
 toForgot.addEventListener("click", () => showView("forgot"));
+toManage.addEventListener("click", () => showView("manage"));
 toLoginFromSignup.addEventListener("click", () => showView("login"));
 toLoginFromForgot.addEventListener("click", () => showView("login"));
+toLoginFromManage.addEventListener("click", () => { showView("login"); prefillLogin(); });
 
 signupBtn.addEventListener("click", signup);
 suBackup.addEventListener("keydown", (e) => { if (e.key === "Enter") signup(); });

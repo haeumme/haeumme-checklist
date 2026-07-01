@@ -96,6 +96,44 @@ body {
 }
 .signin__links--center { justify-content: center; }
 .view[hidden] { display: none; }
+
+/* Manage accounts list */
+.accounts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.account {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: #ffffff;
+  border: 1px solid #cfe0f3;
+  border-radius: 10px;
+  padding: 10px 12px;
+  text-align: left;
+}
+.account__info { min-width: 0; }
+.account__name { font-weight: 700; font-size: 0.92rem; color: var(--ink); }
+.account__user { font-size: 0.78rem; color: var(--muted); }
+.account__del {
+  flex: 0 0 auto;
+  border: 1px solid #eab8b6;
+  background: #fff;
+  color: #d9534f;
+  font-weight: 700;
+  font-size: 0.78rem;
+  padding: 6px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.account__del:hover { background: #fdecec; }
+.accounts__empty { color: #34506e; font-size: 0.9rem; padding: 8px 2px; }
 .signin__link {
   background: none;
   border: none;

@@ -24,6 +24,9 @@
           <button class="signin__link" id="toForgot" type="button">Forgot password?</button>
           <button class="signin__link" id="toSignup" type="button">Create account</button>
         </div>
+        <div class="signin__links signin__links--center">
+          <button class="signin__link" id="toManage" type="button">Manage accounts</button>
+        </div>
       </div>
 
       <!-- CREATE ACCOUNT -->
@@ -54,6 +57,17 @@
         <p class="signin__hint" id="forgotHint"></p>
         <div class="signin__links signin__links--center">
           <button class="signin__link" id="toLoginFromForgot" type="button">← Back to log in</button>
+        </div>
+      </div>
+
+      <!-- MANAGE ACCOUNTS -->
+      <div class="view" id="viewManage" hidden>
+        <h2 class="signin__title">Manage accounts 🗂️</h2>
+        <p class="signin__text">Accounts saved on this device. Deleting one erases that account and its checklist.</p>
+        <div class="accounts" id="accountsList"></div>
+        <p class="signin__hint" id="manageHint"></p>
+        <div class="signin__links signin__links--center">
+          <button class="signin__link" id="toLoginFromManage" type="button">← Back to log in</button>
         </div>
       </div>
 
