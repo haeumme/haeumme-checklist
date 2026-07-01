@@ -37,7 +37,80 @@ body {
   flex-direction: column;
 }
 
+/* Sign-in screen */
+.signin {
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 50;
+}
+.signin[hidden] { display: none; }
+.signin__card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: var(--shadow);
+  padding: 34px 30px;
+  width: 100%;
+  max-width: 380px;
+  text-align: center;
+}
+.signin__title { font-size: 1.6rem; font-weight: 800; margin-bottom: 8px; }
+.signin__text { color: var(--muted); font-size: 0.95rem; line-height: 1.45; margin-bottom: 20px; }
+.signin__input {
+  width: 100%;
+  font-size: 1rem;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--ink);
+  outline: none;
+  margin-bottom: 12px;
+}
+.signin__input:focus { border-color: var(--accent-strong); box-shadow: 0 0 0 3px var(--accent-soft); }
+.signin__btn {
+  width: 100%;
+  border: none;
+  background: var(--accent-strong);
+  color: #fff;
+  font-weight: 700;
+  font-size: 1rem;
+  padding: 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: filter 0.15s ease;
+}
+.signin__btn:hover { filter: brightness(1.08); }
+.signin__hint { margin-top: 12px; font-size: 0.85rem; min-height: 1.1em; color: #d9534f; }
+.signin__hint--ok { color: #2f8f4e; }
+.signin__links {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 6px;
+}
+.signin__link {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px;
+  text-decoration: underline;
+}
+.signin__link:hover { color: var(--accent-strong); }
+.signin__link--danger:hover { color: #d9534f; }
+
+.app[hidden] { display: none; }
+
 .app__header { text-align: center; margin-bottom: 12px; }
+.app__who { font-size: 0.9rem; color: var(--muted); font-weight: 600; margin-top: 2px; }
 
 .app__title {
   font-size: 1.6rem;

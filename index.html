@@ -9,9 +9,26 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✅</text></svg>" />
 </head>
 <body>
-  <main class="app">
+  <div class="signin" id="signin">
+    <div class="signin__card">
+      <h2 class="signin__title">Welcome 👋</h2>
+      <p class="signin__text">Enter your name to open <strong>your</strong> checklist. Add a passcode to keep it private on shared devices.</p>
+      <input class="signin__input" id="nameInput" type="text" placeholder="Your name" autocomplete="off" />
+      <input class="signin__input" id="passInput" type="password" placeholder="Passcode (optional)" autocomplete="off" />
+      <input class="signin__input" id="recoveryInput" type="text" placeholder="Backup answer (in case you forget your passcode)" autocomplete="off" />
+      <button class="signin__btn" id="signinBtn" type="button">Open my checklist</button>
+      <p class="signin__hint" id="signinHint"></p>
+      <div class="signin__links">
+        <button class="signin__link" id="forgotBtn" type="button">Forgot passcode?</button>
+        <button class="signin__link signin__link--danger" id="resetAllBtn" type="button">Reset all accounts</button>
+      </div>
+    </div>
+  </div>
+
+  <main class="app" id="app" hidden>
     <header class="app__header">
       <h1 class="app__title">My Weekly Checklist</h1>
+      <p class="app__who" id="who"></p>
       <div class="progress">
         <div class="progress__bar"><span id="progressFill" class="progress__fill"></span></div>
         <p class="progress__label" id="progressLabel">0 of 0 done</p>
@@ -20,6 +37,7 @@
         <input class="actions__email" id="recipient" type="email" placeholder="Send to (email address)" autocomplete="email" />
         <button class="actions__send" id="sendBtn" type="button">📧 Email my progress</button>
         <button class="reset" id="resetBtn" type="button">Clear all</button>
+        <button class="reset" id="signoutBtn" type="button">Sign out</button>
       </div>
     </header>
 
