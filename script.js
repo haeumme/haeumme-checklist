@@ -2,19 +2,30 @@
 
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const MAKEUP_COL = "Makeup";
-const COLUMNS = DAYS.concat([MAKEUP_COL]); // days + a catch-up column
+const COLUMNS = DAYS.concat([MAKEUP_COL]);
 
-/* Storage keys — data is namespaced per user so no one sees anyone else's list. */
-const PROFILES_KEY = "wc-profiles";     // { userKey: {name, username, pass, recovery} }
-const CURRENT_KEY = "wc-current";       // userKey of the signed-in user
-const LAST_USER_KEY = "wc-last-user";   // last username, to pre-fill the login box
-const dataKeyFor = (k) => "wc-data-" + k;
-const recipientKeyFor = (k) => "wc-recipient-" + k;
+/* Local-only fallback keys (used when the cloud isn't set up) */
+const PROFILES_KEY = "wc-profiles";     // { username: account }
+const SESSION_KEY = "wc-session";       // username logged in on THIS device
+const LAST_USER_KEY = "wc-last-user";   // pre-fill the login box
 
 /* ===========================================================
-   EMAIL SETUP — paste your 3 EmailJS keys between the quotes.
-   (Free signup at https://www.emailjs.com)
-   While these say "PASTE_...", the button opens your mail app instead.
+   CLOUD SETUP (Supabase) — paste your 2 keys to sync accounts
+   across every device. Free signup at https://supabase.com
+   While these say "PASTE_...", accounts are saved on this device only.
+   =========================================================== */
+const SUPABASE = {
+  url: "PASTE_SUPABASE_URL",
+  anonKey: "PASTE_SUPABASE_ANON_KEY",
+};
+const CLOUD_READY =
+  SUPABASE.url.indexOf("PASTE_") !== 0 &&
+  SUPABASE.anonKey.indexOf("PASTE_") !== 0 &&
+  !!window.supabase;
+const sb = CLOUD_READY ? window.supabase.createClient(SUPABASE.url, SUPABASE.anonKey) : null;
+
+/* ===========================================================
+   EMAIL SETUP (EmailJS) — paste your 3 keys to auto-send.
    =========================================================== */
 const EMAILJS = {
   publicKey: "PASTE_PUBLIC_KEY",
@@ -30,7 +41,7 @@ if (EMAIL_READY && window.emailjs) {
 }
 
 // --- App state ---
-let currentKey = null;
+let currentUser = "";   // lowercased username (the key)
 let currentName = "";
 let data = {};
 let idCounter = 0;
@@ -40,6 +51,7 @@ const signinEl = document.getElementById("signin");
 const viewLogin = document.getElementById("viewLogin");
 const viewSignup = document.getElementById("viewSignup");
 const viewForgot = document.getElementById("viewForgot");
+const viewManage = document.getElementById("viewManage");
 
 const loginUser = document.getElementById("loginUser");
 const loginPass = document.getElementById("loginPass");
@@ -47,6 +59,7 @@ const loginBtn = document.getElementById("loginBtn");
 const loginHint = document.getElementById("loginHint");
 const toForgot = document.getElementById("toForgot");
 const toSignup = document.getElementById("toSignup");
+const toManage = document.getElementById("toManage");
 
 const suName = document.getElementById("suName");
 const suUser = document.getElementById("suUser");
@@ -57,12 +70,6 @@ const signupBtn = document.getElementById("signupBtn");
 const signupHint = document.getElementById("signupHint");
 const toLoginFromSignup = document.getElementById("toLoginFromSignup");
 
-const toManage = document.getElementById("toManage");
-const viewManage = document.getElementById("viewManage");
-const accountsList = document.getElementById("accountsList");
-const manageHint = document.getElementById("manageHint");
-const toLoginFromManage = document.getElementById("toLoginFromManage");
-
 const fgUser = document.getElementById("fgUser");
 const fgBackup = document.getElementById("fgBackup");
 const fgPass = document.getElementById("fgPass");
@@ -70,6 +77,10 @@ const fgPass2 = document.getElementById("fgPass2");
 const forgotResetBtn = document.getElementById("forgotResetBtn");
 const forgotHint = document.getElementById("forgotHint");
 const toLoginFromForgot = document.getElementById("toLoginFromForgot");
+
+const accountsList = document.getElementById("accountsList");
+const manageHint = document.getElementById("manageHint");
+const toLoginFromManage = document.getElementById("toLoginFromManage");
 
 // --- App DOM refs ---
 const appEl = document.getElementById("app");
@@ -82,29 +93,17 @@ const signoutBtn = document.getElementById("signoutBtn");
 const recipientEl = document.getElementById("recipient");
 const sendBtn = document.getElementById("sendBtn");
 
-// --- Tiny non-secure hash so passwords aren't stored in plain text ---
+// --- Helpers ---
 function hash(str) {
   let h = 0;
-  for (let i = 0; i < str.length; i++) {
-    h = (h * 31 + str.charCodeAt(i)) | 0;
-  }
+  for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) | 0;
   return String(h);
 }
-function keyForUsername(username) {
-  return "u_" + hash(username.toLowerCase());
+function freshData() {
+  const d = {};
+  COLUMNS.forEach((c) => (d[c] = []));
+  return d;
 }
-
-// --- Profiles storage ---
-function loadProfiles() {
-  try { return JSON.parse(localStorage.getItem(PROFILES_KEY)) || {}; }
-  catch (e) { return {}; }
-}
-function saveProfiles(p) {
-  try { localStorage.setItem(PROFILES_KEY, JSON.stringify(p)); } catch (e) {}
-}
-
-// --- Per-user checklist data ---
-// Make sure every column exists and every task has a subs array (also upgrades old saved data).
 function normalize(obj) {
   const out = obj && typeof obj === "object" ? obj : {};
   COLUMNS.forEach((c) => {
@@ -113,25 +112,86 @@ function normalize(obj) {
   });
   return out;
 }
-function loadData(key) {
-  try {
-    const raw = localStorage.getItem(dataKeyFor(key));
-    if (raw) return normalize(JSON.parse(raw));
-  } catch (e) {}
-  return normalize({});
+
+// ===========================================================
+// STORAGE LAYER — cloud (Supabase) if configured, else this device.
+// An "account" = { username, name, pass, recovery, data, recipient }
+// ===========================================================
+function loadProfilesLocal() {
+  try { return JSON.parse(localStorage.getItem(PROFILES_KEY)) || {}; }
+  catch (e) { return {}; }
 }
-function save() {
-  if (!currentKey) return;
-  try { localStorage.setItem(dataKeyFor(currentKey), JSON.stringify(data)); } catch (e) {}
+function saveProfilesLocal(p) {
+  try { localStorage.setItem(PROFILES_KEY, JSON.stringify(p)); } catch (e) {}
 }
 
-// --- Hint helpers ---
+// Find the real storage key for a username, tolerating older key schemes.
+function findLocalKey(p, username) {
+  const u = (username || "").toLowerCase();
+  if (p[username]) return username;              // exact key
+  if (p[u]) return u;                            // lowercase key
+  for (const k in p) {                           // match by stored username field
+    if (p[k] && (p[k].username || "").toLowerCase() === u) return k;
+  }
+  return null;
+}
+
+const store = {
+  async getAccount(username) {
+    if (sb) {
+      const res = await sb.from("accounts").select("*").eq("username", username).maybeSingle();
+      if (res.error) throw res.error;
+      return res.data || null;
+    }
+    const p = loadProfilesLocal();
+    const k = findLocalKey(p, username);
+    return k ? p[k] : null;
+  },
+  async listAccounts() {
+    if (sb) {
+      const res = await sb.from("accounts").select("name,username");
+      if (res.error) throw res.error;
+      return res.data || [];
+    }
+    return Object.values(loadProfilesLocal()).map((a) => ({ name: a.name, username: a.username }));
+  },
+  async createAccount(acc) {
+    if (sb) {
+      const res = await sb.from("accounts").insert(acc);
+      if (res.error) throw res.error;
+      return;
+    }
+    const p = loadProfilesLocal();
+    p[acc.username] = acc;
+    saveProfilesLocal(p);
+  },
+  async updateAccount(username, changes) {
+    if (sb) {
+      const res = await sb.from("accounts").update(changes).eq("username", username);
+      if (res.error) throw res.error;
+      return;
+    }
+    const p = loadProfilesLocal();
+    const k = findLocalKey(p, username);
+    if (k) { Object.assign(p[k], changes); saveProfilesLocal(p); }
+  },
+  async deleteAccount(username) {
+    if (sb) {
+      const res = await sb.from("accounts").delete().eq("username", username);
+      if (res.error) throw res.error;
+      return;
+    }
+    const p = loadProfilesLocal();
+    const k = findLocalKey(p, username);
+    if (k) { delete p[k]; saveProfilesLocal(p); }
+  },
+};
+
+// --- Hints & views ---
 function setHint(el, msg, ok) {
   el.textContent = msg;
   el.className = "signin__hint" + (ok ? " signin__hint--ok" : "");
 }
-
-// --- View switching ---
 function showView(which) {
   viewLogin.hidden = which !== "login";
   viewSignup.hidden = which !== "signup";
@@ -144,25 +204,113 @@ function showView(which) {
   if (which === "manage") renderAccounts();
 }
 
-// --- Manage accounts (delete the ones you choose) ---
-function renderAccounts() {
-  const profiles = loadProfiles();
-  const keys = Object.keys(profiles);
-  accountsList.innerHTML = "";
+// --- Enter the app with a loaded account ---
+function enterApp(acc) {
+  currentUser = acc.username;
+  currentName = acc.name;
+  data = normalize(acc.data || {});
+  try {
+    localStorage.setItem(SESSION_KEY, currentUser);
+    localStorage.setItem(LAST_USER_KEY, currentUser);
+  } catch (e) {}
+  recipientEl.value = acc.recipient || "";
+  signinEl.hidden = true;
+  appEl.hidden = false;
+  whoEl.textContent = "Signed in as " + currentName;
+  render();
+}
 
-  if (keys.length === 0) {
+// --- Log in ---
+async function login() {
+  const username = loginUser.value.trim().toLowerCase();
+  const pass = loginPass.value;
+  if (!username || !pass) { setHint(loginHint, "Enter your username and password."); return; }
+  setHint(loginHint, "Checking…");
+  let acc;
+  try { acc = await store.getAccount(username); }
+  catch (e) { setHint(loginHint, "Network problem — try again."); return; }
+  if (!acc) { setHint(loginHint, "No account with that username. Try “Create account.”"); return; }
+  if (acc.pass !== hash(pass)) { setHint(loginHint, "Wrong password. Try again or “Forgot password?”"); return; }
+  enterApp(acc);
+}
+
+// --- Create account ---
+async function signup() {
+  const name = suName.value.trim();
+  const username = suUser.value.trim().toLowerCase();
+  const pass = suPass.value;
+  const pass2 = suPass2.value;
+  const backup = suBackup.value.trim();
+
+  if (!name || !username || !pass || !backup) {
+    setHint(signupHint, "Please fill in your name, username, password, and backup answer."); return;
+  }
+  if (pass.length < 4) { setHint(signupHint, "Password should be at least 4 characters."); return; }
+  if (pass !== pass2) { setHint(signupHint, "The two passwords don't match."); return; }
+
+  setHint(signupHint, "Creating…");
+  let existing;
+  try { existing = await store.getAccount(username); }
+  catch (e) { setHint(signupHint, "Network problem — try again."); return; }
+  if (existing) { setHint(signupHint, "That username is taken. Pick another."); return; }
+
+  const acc = {
+    username: username,
+    name: name,
+    pass: hash(pass),
+    recovery: hash(backup.toLowerCase()),
+    data: freshData(),
+    recipient: "",
+  };
+  try { await store.createAccount(acc); }
+  catch (e) { setHint(signupHint, "Couldn't create account — try again."); return; }
+  enterApp(acc);
+}
+
+// --- Forgot / reset password ---
+async function resetPassword() {
+  const username = fgUser.value.trim().toLowerCase();
+  const backup = fgBackup.value.trim();
+  const pass = fgPass.value;
+  const pass2 = fgPass2.value;
+
+  if (!username || !backup || !pass) {
+    setHint(forgotHint, "Fill in your username, backup answer, and a new password."); return;
+  }
+  setHint(forgotHint, "Checking…");
+  let acc;
+  try { acc = await store.getAccount(username); }
+  catch (e) { setHint(forgotHint, "Network problem — try again."); return; }
+  if (!acc) { setHint(forgotHint, "No account with that username."); return; }
+  if (acc.recovery !== hash(backup.toLowerCase())) { setHint(forgotHint, "Backup answer doesn't match."); return; }
+  if (pass.length < 4) { setHint(forgotHint, "New password should be at least 4 characters."); return; }
+  if (pass !== pass2) { setHint(forgotHint, "The two passwords don't match."); return; }
+
+  try { await store.updateAccount(username, { pass: hash(pass) }); }
+  catch (e) { setHint(forgotHint, "Couldn't save — try again."); return; }
+  acc.pass = hash(pass);
+  enterApp(acc);
+}
+
+// --- Manage accounts ---
+async function renderAccounts() {
+  accountsList.innerHTML = "";
+  setHint(manageHint, "Loading…");
+  let list;
+  try { list = await store.listAccounts(); }
+  catch (e) { setHint(manageHint, "Couldn't load accounts."); return; }
+  setHint(manageHint, "");
+
+  if (!list.length) {
     const empty = document.createElement("p");
     empty.className = "accounts__empty";
-    empty.textContent = "No accounts saved on this device yet.";
+    empty.textContent = "No accounts yet.";
     accountsList.appendChild(empty);
     return;
   }
-
-  keys.forEach((key) => {
-    const prof = profiles[key];
+  list.forEach((prof) => {
     const row = document.createElement("div");
     row.className = "account";
-
     const info = document.createElement("div");
     info.className = "account__info";
     const nm = document.createElement("div");
@@ -178,7 +326,7 @@ function renderAccounts() {
     del.className = "account__del";
     del.type = "button";
     del.textContent = "Delete";
-    del.addEventListener("click", () => deleteAccount(key, prof));
+    del.addEventListener("click", () => deleteAccount(prof));
 
     row.appendChild(info);
     row.appendChild(del);
@@ -186,143 +334,35 @@ function renderAccounts() {
   });
 }
 
-function deleteAccount(key, prof) {
-  if (!confirm('Delete "' + prof.name + '" (@' + prof.username + ')?\nThis erases their checklist on this device and cannot be undone.')) return;
+async function deleteAccount(prof) {
+  const entered = prompt('Enter the password for "@' + prof.username + '" to delete it.\nThis erases the checklist and cannot be undone.');
+  if (entered === null) return; // cancelled
 
-  const profiles = loadProfiles();
-  delete profiles[key];
-  saveProfiles(profiles);
+  // Re-fetch the full account so we can verify the password.
+  let full;
+  try { full = await store.getAccount(prof.username); }
+  catch (e) { setHint(manageHint, "Couldn't check password — try again."); return; }
+  if (!full) { setHint(manageHint, "That account no longer exists."); renderAccounts(); return; }
+  if (full.pass !== hash(entered)) {
+    setHint(manageHint, "Wrong password — “" + prof.name + "” was NOT deleted.");
+    return;
+  }
+
+  try { await store.deleteAccount(prof.username); }
+  catch (e) { setHint(manageHint, "Couldn't delete — try again."); return; }
   try {
-    localStorage.removeItem(dataKeyFor(key));
-    localStorage.removeItem(recipientKeyFor(key));
-    if (localStorage.getItem(CURRENT_KEY) === key) localStorage.removeItem(CURRENT_KEY);
+    if (localStorage.getItem(SESSION_KEY) === prof.username) localStorage.removeItem(SESSION_KEY);
     if (localStorage.getItem(LAST_USER_KEY) === prof.username) localStorage.removeItem(LAST_USER_KEY);
   } catch (e) {}
-
   setHint(manageHint, "Deleted “" + prof.name + ".”", true);
   renderAccounts();
-}
-
-// --- Log in ---
-function doLogin(userKey, profile) {
-  currentKey = userKey;
-  currentName = profile.name;
-  try {
-    localStorage.setItem(CURRENT_KEY, userKey);
-    localStorage.setItem(LAST_USER_KEY, profile.username);
-  } catch (e) {}
-  startApp();
-}
-
-// Pre-fill the login username from last time; focus the password if we have it.
-function prefillLogin() {
-  const last = localStorage.getItem(LAST_USER_KEY);
-  if (last) {
-    loginUser.value = last;
-    loginPass.value = "";
-    loginPass.focus();
-  } else {
-    loginUser.focus();
-  }
-}
-
-function login() {
-  const username = loginUser.value.trim();
-  const pass = loginPass.value;
-  if (!username || !pass) {
-    setHint(loginHint, "Enter your username and password.");
-    return;
-  }
-  const key = keyForUsername(username);
-  const profiles = loadProfiles();
-  const prof = profiles[key];
-  if (!prof) {
-    setHint(loginHint, "No account with that username. Try “Create account.”");
-    return;
-  }
-  if (prof.pass !== hash(pass)) {
-    setHint(loginHint, "Wrong password. Try again or “Forgot password?”");
-    return;
-  }
-  doLogin(key, prof);
-}
-
-// --- Create account ---
-function signup() {
-  const name = suName.value.trim();
-  const username = suUser.value.trim();
-  const pass = suPass.value;
-  const pass2 = suPass2.value;
-  const backup = suBackup.value.trim();
-
-  if (!name || !username || !pass || !backup) {
-    setHint(signupHint, "Please fill in your name, username, password, and backup answer.");
-    return;
-  }
-  if (pass.length < 4) {
-    setHint(signupHint, "Password should be at least 4 characters.");
-    return;
-  }
-  if (pass !== pass2) {
-    setHint(signupHint, "The two passwords don't match.");
-    return;
-  }
-  const key = keyForUsername(username);
-  const profiles = loadProfiles();
-  if (profiles[key]) {
-    setHint(signupHint, "That username is taken. Pick another.");
-    return;
-  }
-  profiles[key] = {
-    name: name,
-    username: username,
-    pass: hash(pass),
-    recovery: hash(backup.toLowerCase()),
-  };
-  saveProfiles(profiles);
-  doLogin(key, profiles[key]);
-}
-
-// --- Forgot / reset password ---
-function resetPassword() {
-  const username = fgUser.value.trim();
-  const backup = fgBackup.value.trim();
-  const pass = fgPass.value;
-  const pass2 = fgPass2.value;
-
-  if (!username || !backup || !pass) {
-    setHint(forgotHint, "Fill in your username, backup answer, and a new password.");
-    return;
-  }
-  const key = keyForUsername(username);
-  const profiles = loadProfiles();
-  const prof = profiles[key];
-  if (!prof) {
-    setHint(forgotHint, "No account with that username.");
-    return;
-  }
-  if (prof.recovery !== hash(backup.toLowerCase())) {
-    setHint(forgotHint, "Backup answer doesn't match.");
-    return;
-  }
-  if (pass.length < 4) {
-    setHint(forgotHint, "New password should be at least 4 characters.");
-    return;
-  }
-  if (pass !== pass2) {
-    setHint(forgotHint, "The two passwords don't match.");
-    return;
-  }
-  prof.pass = hash(pass);
-  saveProfiles(profiles);
-  doLogin(key, prof);
 }
 
 // --- Sign out (with confirm) ---
 function signOut() {
   if (!confirm("Sign out? Your checklist is saved and will be here when you log back in.")) return;
-  try { localStorage.removeItem(CURRENT_KEY); } catch (e) {}
-  currentKey = null;
+  try { localStorage.removeItem(SESSION_KEY); } catch (e) {}
+  currentUser = "";
   currentName = "";
   data = {};
   appEl.hidden = true;
@@ -331,32 +371,26 @@ function signOut() {
   prefillLogin();
 }
 
-// --- Start app after login ---
-function startApp() {
-  data = loadData(currentKey);
-  signinEl.hidden = true;
-  appEl.hidden = false;
-  whoEl.textContent = "Signed in as " + currentName;
-  const savedRecipient = localStorage.getItem(recipientKeyFor(currentKey));
-  recipientEl.value = savedRecipient || "";
-  render();
+function prefillLogin() {
+  const last = localStorage.getItem(LAST_USER_KEY);
+  if (last) { loginUser.value = last; loginPass.value = ""; loginPass.focus(); }
+  else { loginUser.focus(); }
+}
+
+// --- Save the current user's checklist (fire-and-forget) ---
+function save() {
+  if (!currentUser) return;
+  store.updateAccount(currentUser, { data: data }).catch(function () {});
 }
 
 // --- Tasks ---
-function nextId() {
-  idCounter += 1;
-  return "t" + idCounter + "-" + boardEl.childElementCount;
-}
-function todayName() {
-  const jsDay = new Date().getDay(); // 0=Sun..6=Sat
-  return DAYS[(jsDay + 6) % 7];
-}
+function nextId() { idCounter += 1; return "t" + idCounter + "-" + boardEl.childElementCount; }
+function todayName() { const j = new Date().getDay(); return DAYS[(j + 6) % 7]; }
 function addTask(day, text) {
   const clean = text.trim();
   if (!clean) return;
   data[day].push({ id: nextId(), text: clean, done: false, subs: [] });
-  save();
-  render();
+  save(); render();
 }
 function toggleTask(day, id) {
   const t = data[day].find((x) => x.id === id);
@@ -364,11 +398,8 @@ function toggleTask(day, id) {
 }
 function deleteTask(day, id) {
   data[day] = data[day].filter((x) => x.id !== id);
-  save();
-  render();
+  save(); render();
 }
-
-// Sub-steps under a task
 function addSub(col, taskId, text) {
   const clean = text.trim();
   if (!clean) return;
@@ -376,8 +407,7 @@ function addSub(col, taskId, text) {
   if (!t) return;
   if (!Array.isArray(t.subs)) t.subs = [];
   t.subs.push({ id: nextId(), text: clean, done: false });
-  save();
-  render();
+  save(); render();
 }
 function toggleSub(col, taskId, subId) {
   const t = data[col].find((x) => x.id === taskId);
@@ -389,23 +419,17 @@ function deleteSub(col, taskId, subId) {
   const t = data[col].find((x) => x.id === taskId);
   if (!t) return;
   t.subs = t.subs.filter((x) => x.id !== subId);
-  save();
-  render();
+  save(); render();
 }
-
 function clearAll() {
   if (!confirm("Clear your whole week? This cannot be undone.")) return;
   COLUMNS.forEach((d) => (data[d] = []));
-  save();
-  render();
+  save(); render();
 }
 
 function updateProgress() {
   let total = 0, done = 0;
-  COLUMNS.forEach((d) => {
-    total += data[d].length;
-    done += data[d].filter((t) => t.done).length;
-  });
+  COLUMNS.forEach((d) => { total += data[d].length; done += data[d].filter((t) => t.done).length; });
   const pct = total === 0 ? 0 : Math.round((done / total) * 100);
   progressFill.style.width = pct + "%";
   progressLabel.textContent =
@@ -435,11 +459,8 @@ function render() {
 
     const count = document.createElement("div");
     count.className = "day__count";
-    if (isMakeup) {
-      count.textContent = tasks.length ? `${doneCount}/${tasks.length} done` : "Stuff you didn't get to";
-    } else {
-      count.textContent = tasks.length ? `${doneCount}/${tasks.length} done` : "No tasks yet";
-    }
+    if (isMakeup) count.textContent = tasks.length ? `${doneCount}/${tasks.length} done` : "Stuff you didn't get to";
+    else count.textContent = tasks.length ? `${doneCount}/${tasks.length} done` : "No tasks yet";
     col.appendChild(count);
 
     const ul = document.createElement("ul");
@@ -456,64 +477,49 @@ function render() {
       const li = document.createElement("li");
       li.className = "task" + (t.done ? " task--done" : "");
 
-      // main clickable row
       const main = document.createElement("div");
       main.className = "task__main";
-
       const check = document.createElement("span");
       check.className = "task__check";
       check.textContent = "✓";
-
       const text = document.createElement("span");
       text.className = "task__text";
       text.textContent = t.text;
-
       const del = document.createElement("button");
       del.className = "task__del";
       del.type = "button";
       del.textContent = "✕";
       del.title = "Delete";
       del.addEventListener("click", (e) => { e.stopPropagation(); deleteTask(day, t.id); });
-
       main.addEventListener("click", () => toggleTask(day, t.id));
-      main.appendChild(check);
-      main.appendChild(text);
-      main.appendChild(del);
+      main.appendChild(check); main.appendChild(text); main.appendChild(del);
       li.appendChild(main);
 
-      // sub-steps
       if (t.subs && t.subs.length) {
         const sul = document.createElement("ul");
         sul.className = "subs";
         t.subs.forEach((s) => {
           const sli = document.createElement("li");
           sli.className = "subtask" + (s.done ? " subtask--done" : "");
-
-          const scheck = document.createElement("span");
-          scheck.className = "subtask__check";
-          scheck.textContent = "✓";
-
-          const stext = document.createElement("span");
-          stext.className = "subtask__text";
-          stext.textContent = s.text;
-
-          const sdel = document.createElement("button");
-          sdel.className = "subtask__del";
-          sdel.type = "button";
-          sdel.textContent = "✕";
-          sdel.title = "Delete step";
-          sdel.addEventListener("click", (e) => { e.stopPropagation(); deleteSub(day, t.id, s.id); });
-
+          const sc = document.createElement("span");
+          sc.className = "subtask__check";
+          sc.textContent = "✓";
+          const st = document.createElement("span");
+          st.className = "subtask__text";
+          st.textContent = s.text;
+          const sd = document.createElement("button");
+          sd.className = "subtask__del";
+          sd.type = "button";
+          sd.textContent = "✕";
+          sd.title = "Delete step";
+          sd.addEventListener("click", (e) => { e.stopPropagation(); deleteSub(day, t.id, s.id); });
           sli.addEventListener("click", (e) => { e.stopPropagation(); toggleSub(day, t.id, s.id); });
-          sli.appendChild(scheck);
-          sli.appendChild(stext);
-          sli.appendChild(sdel);
+          sli.appendChild(sc); sli.appendChild(st); sli.appendChild(sd);
           sul.appendChild(sli);
         });
         li.appendChild(sul);
       }
 
-      // add sub-step box
       const sadd = document.createElement("div");
       sadd.className = "subadd";
       const sinput = document.createElement("input");
@@ -545,13 +551,10 @@ function render() {
     btn.type = "button";
     btn.textContent = "+";
     btn.title = "Add";
-
     const commit = () => addTask(day, input.value);
     btn.addEventListener("click", commit);
     input.addEventListener("keydown", (e) => { if (e.key === "Enter") commit(); });
-
-    add.appendChild(input);
-    add.appendChild(btn);
+    add.appendChild(input); add.appendChild(btn);
     col.appendChild(add);
 
     boardEl.appendChild(col);
@@ -572,9 +575,7 @@ function buildEmailBody() {
       total += 1;
       if (t.done) done += 1;
       lines.push("  " + (t.done ? "[x] " : "[ ] ") + t.text);
-      (t.subs || []).forEach((s) => {
-        lines.push("      - " + (s.done ? "[x] " : "[ ] ") + s.text);
-      });
+      (t.subs || []).forEach((s) => lines.push("      - " + (s.done ? "[x] " : "[ ] ") + s.text));
     });
     lines.push("");
   });
@@ -583,30 +584,17 @@ function buildEmailBody() {
     : `Here's my week — ${done} of ${total} done (${Math.round((done / total) * 100)}%):`;
   return "Hi!\n\n" + header + "\n\n" + lines.join("\n") + "\nSent from " + currentName + "'s Weekly Checklist.";
 }
-
 function openMailApp(to, subject, body) {
-  window.location.href =
-    "mailto:" + encodeURIComponent(to) +
-    "?subject=" + encodeURIComponent(subject) +
-    "&body=" + encodeURIComponent(body);
+  window.location.href = "mailto:" + encodeURIComponent(to) +
+    "?subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(body);
 }
-
 function sendEmail() {
   const to = recipientEl.value.trim();
-  if (!to) {
-    recipientEl.focus();
-    alert("Please type the email address to send to first.");
-    return;
-  }
-  try { localStorage.setItem(recipientKeyFor(currentKey), to); } catch (e) {}
+  if (!to) { recipientEl.focus(); alert("Please type the email address to send to first."); return; }
+  store.updateAccount(currentUser, { recipient: to }).catch(function () {});
   const subject = currentName + "'s Weekly Checklist progress";
   const body = buildEmailBody();
-
-  if (!EMAIL_READY || !window.emailjs) {
-    openMailApp(to, subject, body);
-    return;
-  }
-
+  if (!EMAIL_READY || !window.emailjs) { openMailApp(to, subject, body); return; }
   const original = sendBtn.textContent;
   sendBtn.textContent = "Sending…";
   sendBtn.disabled = true;
@@ -616,14 +604,13 @@ function sendEmail() {
       setTimeout(function () { sendBtn.textContent = original; sendBtn.disabled = false; }, 2000);
     })
     .catch(function (err) {
-      sendBtn.textContent = original;
-      sendBtn.disabled = false;
+      sendBtn.textContent = original; sendBtn.disabled = false;
       alert("Couldn't send automatically. Opening your mail app instead.\n\n(" + (err && err.text ? err.text : err) + ")");
       openMailApp(to, subject, body);
     });
 }
 
-// --- Wire up sign-in events ---
+// --- Wire up events ---
 loginBtn.addEventListener("click", login);
 loginPass.addEventListener("keydown", (e) => { if (e.key === "Enter") login(); });
 loginUser.addEventListener("keydown", (e) => { if (e.key === "Enter") loginPass.focus(); });
@@ -637,26 +624,22 @@ toLoginFromManage.addEventListener("click", () => { showView("login"); prefillLo
 
 signupBtn.addEventListener("click", signup);
 suBackup.addEventListener("keydown", (e) => { if (e.key === "Enter") signup(); });
-
 forgotResetBtn.addEventListener("click", resetPassword);
 fgPass2.addEventListener("keydown", (e) => { if (e.key === "Enter") resetPassword(); });
 
-// --- App events ---
 signoutBtn.addEventListener("click", signOut);
 resetBtn.addEventListener("click", clearAll);
 sendBtn.addEventListener("click", sendEmail);
 
-// --- Start: auto-resume last signed-in user on this device ---
-(function init() {
-  const saved = localStorage.getItem(CURRENT_KEY);
-  if (saved) {
-    const profiles = loadProfiles();
-    if (profiles[saved]) {
-      currentKey = saved;
-      currentName = profiles[saved].name;
-      startApp();
-      return;
-    }
+// --- Start: resume the last session on this device ---
+(async function init() {
+  showView("login");
+  const sess = localStorage.getItem(SESSION_KEY);
+  if (sess) {
+    try {
+      const acc = await store.getAccount(sess);
+      if (acc) { enterApp(acc); return; }
+    } catch (e) { /* fall through to login */ }
   }
   signinEl.hidden = false;
   appEl.hidden = true;
