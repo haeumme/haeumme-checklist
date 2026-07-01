@@ -1,6 +1,8 @@
 "use strict";
 
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const MAKEUP_COL = "Makeup";
+const COLUMNS = DAYS.concat([MAKEUP_COL]); // days + a catch-up column
 
 /* Storage keys — data is namespaced per user so no one sees anyone else's list. */
 const PROFILES_KEY = "wc-profiles";     // { userKey: {name, username, pass, recovery} }
@@ -96,14 +98,21 @@ function saveProfiles(p) {
 }
 
 // --- Per-user checklist data ---
+// Make sure every column exists and every task has a subs array (also upgrades old saved data).
+function normalize(obj) {
+  const out = obj && typeof obj === "object" ? obj : {};
+  COLUMNS.forEach((c) => {
+    if (!Array.isArray(out[c])) out[c] = [];
+    out[c].forEach((t) => { if (!Array.isArray(t.subs)) t.subs = []; });
+  });
+  return out;
+}
 function loadData(key) {
   try {
     const raw = localStorage.getItem(dataKeyFor(key));
-    if (raw) return JSON.parse(raw);
+    if (raw) return normalize(JSON.parse(raw));
   } catch (e) {}
-  const fresh = {};
-  DAYS.forEach((d) => (fresh[d] = []));
-  return fresh;
+  return normalize({});
 }
 function save() {
   if (!currentKey) return;
@@ -277,7 +286,7 @@ function todayName() {
 function addTask(day, text) {
   const clean = text.trim();
   if (!clean) return;
-  data[day].push({ id: nextId(), text: clean, done: false });
+  data[day].push({ id: nextId(), text: clean, done: false, subs: [] });
   save();
   render();
 }
@@ -290,16 +299,42 @@ function deleteTask(day, id) {
   save();
   render();
 }
+
+// Sub-steps under a task
+function addSub(col, taskId, text) {
+  const clean = text.trim();
+  if (!clean) return;
+  const t = data[col].find((x) => x.id === taskId);
+  if (!t) return;
+  if (!Array.isArray(t.subs)) t.subs = [];
+  t.subs.push({ id: nextId(), text: clean, done: false });
+  save();
+  render();
+}
+function toggleSub(col, taskId, subId) {
+  const t = data[col].find((x) => x.id === taskId);
+  if (!t) return;
+  const s = t.subs.find((x) => x.id === subId);
+  if (s) { s.done = !s.done; save(); render(); }
+}
+function deleteSub(col, taskId, subId) {
+  const t = data[col].find((x) => x.id === taskId);
+  if (!t) return;
+  t.subs = t.subs.filter((x) => x.id !== subId);
+  save();
+  render();
+}
+
 function clearAll() {
   if (!confirm("Clear your whole week? This cannot be undone.")) return;
-  DAYS.forEach((d) => (data[d] = []));
+  COLUMNS.forEach((d) => (data[d] = []));
   save();
   render();
 }
 
 function updateProgress() {
   let total = 0, done = 0;
-  DAYS.forEach((d) => {
+  COLUMNS.forEach((d) => {
     total += data[d].length;
     done += data[d].filter((t) => t.done).length;
   });
@@ -313,22 +348,30 @@ function render() {
   const today = todayName();
   boardEl.innerHTML = "";
 
-  DAYS.forEach((day) => {
+  COLUMNS.forEach((day) => {
     const tasks = data[day];
     const doneCount = tasks.filter((t) => t.done).length;
+    const isMakeup = day === MAKEUP_COL;
+    const isToday = !isMakeup && day === today;
 
     const col = document.createElement("section");
-    col.className = "day" + (day === today ? " day--today" : "");
+    col.className = "day" + (isToday ? " day--today" : "") + (isMakeup ? " day--makeup" : "");
 
     const name = document.createElement("div");
     name.className = "day__name";
-    name.innerHTML =
-      `<span>${day}</span>` + (day === today ? `<span class="day__today-tag">TODAY</span>` : "");
+    let tag = "";
+    if (isToday) tag = `<span class="day__today-tag">TODAY</span>`;
+    if (isMakeup) tag = `<span class="day__makeup-tag">CATCH-UP</span>`;
+    name.innerHTML = `<span>${day}</span>` + tag;
     col.appendChild(name);
 
     const count = document.createElement("div");
     count.className = "day__count";
-    count.textContent = tasks.length ? `${doneCount}/${tasks.length} done` : "No tasks yet";
+    if (isMakeup) {
+      count.textContent = tasks.length ? `${doneCount}/${tasks.length} done` : "Stuff you didn't get to";
+    } else {
+      count.textContent = tasks.length ? `${doneCount}/${tasks.length} done` : "No tasks yet";
+    }
     col.appendChild(count);
 
     const ul = document.createElement("ul");
@@ -337,13 +380,17 @@ function render() {
     if (tasks.length === 0) {
       const empty = document.createElement("li");
       empty.className = "empty";
-      empty.textContent = "Nothing here — add a task!";
+      empty.textContent = isMakeup ? "Nothing to make up 🎉" : "Nothing here — add a task!";
       ul.appendChild(empty);
     }
 
     tasks.forEach((t) => {
       const li = document.createElement("li");
       li.className = "task" + (t.done ? " task--done" : "");
+
+      // main clickable row
+      const main = document.createElement("div");
+      main.className = "task__main";
 
       const check = document.createElement("span");
       check.className = "task__check";
@@ -360,10 +407,59 @@ function render() {
       del.title = "Delete";
       del.addEventListener("click", (e) => { e.stopPropagation(); deleteTask(day, t.id); });
 
-      li.addEventListener("click", () => toggleTask(day, t.id));
-      li.appendChild(check);
-      li.appendChild(text);
-      li.appendChild(del);
+      main.addEventListener("click", () => toggleTask(day, t.id));
+      main.appendChild(check);
+      main.appendChild(text);
+      main.appendChild(del);
+      li.appendChild(main);
+
+      // sub-steps
+      if (t.subs && t.subs.length) {
+        const sul = document.createElement("ul");
+        sul.className = "subs";
+        t.subs.forEach((s) => {
+          const sli = document.createElement("li");
+          sli.className = "subtask" + (s.done ? " subtask--done" : "");
+
+          const scheck = document.createElement("span");
+          scheck.className = "subtask__check";
+          scheck.textContent = "✓";
+
+          const stext = document.createElement("span");
+          stext.className = "subtask__text";
+          stext.textContent = s.text;
+
+          const sdel = document.createElement("button");
+          sdel.className = "subtask__del";
+          sdel.type = "button";
+          sdel.textContent = "✕";
+          sdel.title = "Delete step";
+          sdel.addEventListener("click", (e) => { e.stopPropagation(); deleteSub(day, t.id, s.id); });
+
+          sli.addEventListener("click", (e) => { e.stopPropagation(); toggleSub(day, t.id, s.id); });
+          sli.appendChild(scheck);
+          sli.appendChild(stext);
+          sli.appendChild(sdel);
+          sul.appendChild(sli);
+        });
+        li.appendChild(sul);
+      }
+
+      // add sub-step box
+      const sadd = document.createElement("div");
+      sadd.className = "subadd";
+      const sinput = document.createElement("input");
+      sinput.className = "subadd__input";
+      sinput.type = "text";
+      sinput.placeholder = "＋ step";
+      sinput.setAttribute("aria-label", "Add a step to " + t.text);
+      sinput.addEventListener("click", (e) => e.stopPropagation());
+      sinput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { e.stopPropagation(); addSub(day, t.id, sinput.value); }
+      });
+      sadd.appendChild(sinput);
+      li.appendChild(sadd);
+
       ul.appendChild(li);
     });
 
@@ -374,7 +470,7 @@ function render() {
     const input = document.createElement("input");
     input.className = "add__input";
     input.type = "text";
-    input.placeholder = "Add a task…";
+    input.placeholder = isMakeup ? "Add a make-up task…" : "Add a task…";
     input.setAttribute("aria-label", "Add a task to " + day);
     const btn = document.createElement("button");
     btn.className = "add__btn";
@@ -400,7 +496,7 @@ function render() {
 function buildEmailBody() {
   let total = 0, done = 0;
   const lines = [];
-  DAYS.forEach((day) => {
+  COLUMNS.forEach((day) => {
     const tasks = data[day];
     if (tasks.length === 0) return;
     lines.push(day + ":");
@@ -408,6 +504,9 @@ function buildEmailBody() {
       total += 1;
       if (t.done) done += 1;
       lines.push("  " + (t.done ? "[x] " : "[ ] ") + t.text);
+      (t.subs || []).forEach((s) => {
+        lines.push("      - " + (s.done ? "[x] " : "[ ] ") + s.text);
+      });
     });
     lines.push("");
   });
