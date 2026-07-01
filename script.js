@@ -428,12 +428,14 @@ function clearAll() {
 }
 
 function updateProgress() {
-  let total = 0, done = 0;
-  COLUMNS.forEach((d) => { total += data[d].length; done += data[d].filter((t) => t.done).length; });
+  const today = todayName();
+  const tasks = data[today] || [];
+  const total = tasks.length;
+  const done = tasks.filter((t) => t.done).length;
   const pct = total === 0 ? 0 : Math.round((done / total) * 100);
   progressFill.style.width = pct + "%";
   progressLabel.textContent =
-    total === 0 ? "Add some tasks to get started" : `${done} of ${total} done · ${pct}%`;
+    total === 0 ? `No tasks for ${today} yet` : `${today}: ${done} of ${total} done · ${pct}%`;
 }
 
 function render() {
