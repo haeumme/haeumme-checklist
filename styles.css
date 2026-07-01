@@ -94,6 +94,8 @@ body {
   gap: 10px;
   margin-top: 6px;
 }
+.signin__links--center { justify-content: center; }
+.view[hidden] { display: none; }
 .signin__link {
   background: none;
   border: none;

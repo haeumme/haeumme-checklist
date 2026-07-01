@@ -11,17 +11,52 @@
 <body>
   <div class="signin" id="signin">
     <div class="signin__card">
-      <h2 class="signin__title">Welcome 👋</h2>
-      <p class="signin__text">Enter your name to open <strong>your</strong> checklist. Add a passcode to keep it private on shared devices.</p>
-      <input class="signin__input" id="nameInput" type="text" placeholder="Your name" autocomplete="off" />
-      <input class="signin__input" id="passInput" type="password" placeholder="Passcode (optional)" autocomplete="off" />
-      <input class="signin__input" id="recoveryInput" type="text" placeholder="Backup answer" autocomplete="off" />
-      <button class="signin__btn" id="signinBtn" type="button">Open my checklist</button>
-      <p class="signin__hint" id="signinHint"></p>
-      <div class="signin__links">
-        <button class="signin__link" id="forgotBtn" type="button">Forgot passcode?</button>
-        <button class="signin__link signin__link--danger" id="resetAllBtn" type="button">Reset all accounts</button>
+
+      <!-- LOG IN -->
+      <div class="view" id="viewLogin">
+        <h2 class="signin__title">Welcome back 👋</h2>
+        <p class="signin__text">Log in to open your checklist.</p>
+        <input class="signin__input" id="loginUser" type="text" placeholder="Username" autocomplete="off" />
+        <input class="signin__input" id="loginPass" type="password" placeholder="Password" autocomplete="off" />
+        <button class="signin__btn" id="loginBtn" type="button">Log in</button>
+        <p class="signin__hint" id="loginHint"></p>
+        <div class="signin__links">
+          <button class="signin__link" id="toForgot" type="button">Forgot password?</button>
+          <button class="signin__link" id="toSignup" type="button">Create account</button>
+        </div>
       </div>
+
+      <!-- CREATE ACCOUNT -->
+      <div class="view" id="viewSignup" hidden>
+        <h2 class="signin__title">Create account ✨</h2>
+        <p class="signin__text">Make your own private checklist.</p>
+        <input class="signin__input" id="suName" type="text" placeholder="Your name" autocomplete="off" />
+        <input class="signin__input" id="suUser" type="text" placeholder="Username" autocomplete="off" />
+        <input class="signin__input" id="suPass" type="password" placeholder="Password" autocomplete="off" />
+        <input class="signin__input" id="suPass2" type="password" placeholder="Confirm password" autocomplete="off" />
+        <input class="signin__input" id="suBackup" type="text" placeholder="Backup answer (if you forget)" autocomplete="off" />
+        <button class="signin__btn" id="signupBtn" type="button">Create account</button>
+        <p class="signin__hint" id="signupHint"></p>
+        <div class="signin__links signin__links--center">
+          <button class="signin__link" id="toLoginFromSignup" type="button">← Back to log in</button>
+        </div>
+      </div>
+
+      <!-- FORGOT PASSWORD -->
+      <div class="view" id="viewForgot" hidden>
+        <h2 class="signin__title">Reset password 🔑</h2>
+        <p class="signin__text">Enter your username and backup answer to set a new password.</p>
+        <input class="signin__input" id="fgUser" type="text" placeholder="Username" autocomplete="off" />
+        <input class="signin__input" id="fgBackup" type="text" placeholder="Backup answer" autocomplete="off" />
+        <input class="signin__input" id="fgPass" type="password" placeholder="New password" autocomplete="off" />
+        <input class="signin__input" id="fgPass2" type="password" placeholder="Confirm new password" autocomplete="off" />
+        <button class="signin__btn" id="forgotResetBtn" type="button">Reset password</button>
+        <p class="signin__hint" id="forgotHint"></p>
+        <div class="signin__links signin__links--center">
+          <button class="signin__link" id="toLoginFromForgot" type="button">← Back to log in</button>
+        </div>
+      </div>
+
     </div>
   </div>
 

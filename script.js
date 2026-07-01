@@ -3,8 +3,9 @@
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
 /* Storage keys — data is namespaced per user so no one sees anyone else's list. */
-const PROFILES_KEY = "wc-profiles";     // { key: {name, pass} }
-const CURRENT_KEY = "wc-current";       // key of the signed-in user
+const PROFILES_KEY = "wc-profiles";     // { userKey: {name, username, pass, recovery} }
+const CURRENT_KEY = "wc-current";       // userKey of the signed-in user
+const LAST_USER_KEY = "wc-last-user";   // last username, to pre-fill the login box
 const dataKeyFor = (k) => "wc-data-" + k;
 const recipientKeyFor = (k) => "wc-recipient-" + k;
 
@@ -27,21 +28,42 @@ if (EMAIL_READY && window.emailjs) {
 }
 
 // --- App state ---
-let currentKey = null;   // storage key for the current user
-let currentName = "";    // display name
-let data = {};           // { Monday: [...], ... } for the current user
+let currentKey = null;
+let currentName = "";
+let data = {};
 let idCounter = 0;
 
-// --- DOM refs ---
+// --- Sign-in DOM refs ---
 const signinEl = document.getElementById("signin");
-const nameInput = document.getElementById("nameInput");
-const passInput = document.getElementById("passInput");
-const recoveryInput = document.getElementById("recoveryInput");
-const signinBtn = document.getElementById("signinBtn");
-const signinHint = document.getElementById("signinHint");
-const forgotBtn = document.getElementById("forgotBtn");
-const resetAllBtn = document.getElementById("resetAllBtn");
+const viewLogin = document.getElementById("viewLogin");
+const viewSignup = document.getElementById("viewSignup");
+const viewForgot = document.getElementById("viewForgot");
 
+const loginUser = document.getElementById("loginUser");
+const loginPass = document.getElementById("loginPass");
+const loginBtn = document.getElementById("loginBtn");
+const loginHint = document.getElementById("loginHint");
+const toForgot = document.getElementById("toForgot");
+const toSignup = document.getElementById("toSignup");
+
+const suName = document.getElementById("suName");
+const suUser = document.getElementById("suUser");
+const suPass = document.getElementById("suPass");
+const suPass2 = document.getElementById("suPass2");
+const suBackup = document.getElementById("suBackup");
+const signupBtn = document.getElementById("signupBtn");
+const signupHint = document.getElementById("signupHint");
+const toLoginFromSignup = document.getElementById("toLoginFromSignup");
+
+const fgUser = document.getElementById("fgUser");
+const fgBackup = document.getElementById("fgBackup");
+const fgPass = document.getElementById("fgPass");
+const fgPass2 = document.getElementById("fgPass2");
+const forgotResetBtn = document.getElementById("forgotResetBtn");
+const forgotHint = document.getElementById("forgotHint");
+const toLoginFromForgot = document.getElementById("toLoginFromForgot");
+
+// --- App DOM refs ---
 const appEl = document.getElementById("app");
 const whoEl = document.getElementById("who");
 const boardEl = document.getElementById("board");
@@ -52,7 +74,7 @@ const signoutBtn = document.getElementById("signoutBtn");
 const recipientEl = document.getElementById("recipient");
 const sendBtn = document.getElementById("sendBtn");
 
-// --- Tiny non-secure hash so passcodes aren't stored in plain text ---
+// --- Tiny non-secure hash so passwords aren't stored in plain text ---
 function hash(str) {
   let h = 0;
   for (let i = 0; i < str.length; i++) {
@@ -60,14 +82,14 @@ function hash(str) {
   }
   return String(h);
 }
+function keyForUsername(username) {
+  return "u_" + hash(username.toLowerCase());
+}
 
-// --- Profiles ---
+// --- Profiles storage ---
 function loadProfiles() {
-  try {
-    return JSON.parse(localStorage.getItem(PROFILES_KEY)) || {};
-  } catch (e) {
-    return {};
-  }
+  try { return JSON.parse(localStorage.getItem(PROFILES_KEY)) || {}; }
+  catch (e) { return {}; }
 }
 function saveProfiles(p) {
   try { localStorage.setItem(PROFILES_KEY, JSON.stringify(p)); } catch (e) {}
@@ -88,132 +110,158 @@ function save() {
   try { localStorage.setItem(dataKeyFor(currentKey), JSON.stringify(data)); } catch (e) {}
 }
 
-// --- Sign in / out ---
-function showHint(msg, ok) {
-  signinHint.textContent = msg;
-  signinHint.className = "signin__hint" + (ok ? " signin__hint--ok" : "");
+// --- Hint helpers ---
+function setHint(el, msg, ok) {
+  el.textContent = msg;
+  el.className = "signin__hint" + (ok ? " signin__hint--ok" : "");
 }
 
-function signIn() {
-  const name = nameInput.value.trim();
-  const pass = passInput.value;
-  const recovery = recoveryInput.value.trim();
-  if (!name) {
-    showHint("Please type your name.");
-    nameInput.focus();
-    return;
-  }
-  const key = "u_" + hash(name.toLowerCase());
-  const profiles = loadProfiles();
-  const existing = profiles[key];
+// --- View switching ---
+function showView(which) {
+  viewLogin.hidden = which !== "login";
+  viewSignup.hidden = which !== "signup";
+  viewForgot.hidden = which !== "forgot";
+  setHint(loginHint, "");
+  setHint(signupHint, "");
+  setHint(forgotHint, "");
+}
 
-  if (existing) {
-    // Returning user: check passcode if they set one.
-    if (existing.pass && existing.pass !== hash(pass)) {
-      showHint("Wrong passcode. Forgot it? Type your backup answer above, then click “Forgot passcode?”");
-      passInput.focus();
-      return;
-    }
-  } else {
-    // New user: create the profile with optional passcode + backup answer.
-    profiles[key] = {
-      name: name,
-      pass: pass ? hash(pass) : "",
-      recovery: recovery ? hash(recovery.toLowerCase()) : "",
-    };
-    saveProfiles(profiles);
-  }
-
-  currentKey = key;
-  currentName = existing ? existing.name : name;
-  try { localStorage.setItem(CURRENT_KEY, key); } catch (e) {}
-
+// --- Log in ---
+function doLogin(userKey, profile) {
+  currentKey = userKey;
+  currentName = profile.name;
+  try {
+    localStorage.setItem(CURRENT_KEY, userKey);
+    localStorage.setItem(LAST_USER_KEY, profile.username);
+  } catch (e) {}
   startApp();
 }
 
-// Recover access using the backup answer, then set a new passcode.
-function recoverAccess() {
-  const name = nameInput.value.trim();
-  const answer = recoveryInput.value.trim();
-  if (!name) {
-    showHint("Type your name first, then your backup answer.");
-    nameInput.focus();
+// Pre-fill the login username from last time; focus the password if we have it.
+function prefillLogin() {
+  const last = localStorage.getItem(LAST_USER_KEY);
+  if (last) {
+    loginUser.value = last;
+    loginPass.value = "";
+    loginPass.focus();
+  } else {
+    loginUser.focus();
+  }
+}
+
+function login() {
+  const username = loginUser.value.trim();
+  const pass = loginPass.value;
+  if (!username || !pass) {
+    setHint(loginHint, "Enter your username and password.");
     return;
   }
-  const key = "u_" + hash(name.toLowerCase());
+  const key = keyForUsername(username);
   const profiles = loadProfiles();
   const prof = profiles[key];
   if (!prof) {
-    showHint("No account with that name on this device.");
+    setHint(loginHint, "No account with that username. Try “Create account.”");
     return;
   }
-  if (!prof.recovery) {
-    showHint("No backup answer was set for this account. Use “Reset all accounts” if you're locked out.");
+  if (prof.pass !== hash(pass)) {
+    setHint(loginHint, "Wrong password. Try again or “Forgot password?”");
     return;
   }
-  if (!answer || prof.recovery !== hash(answer.toLowerCase())) {
-    showHint("Backup answer doesn't match. Try again.");
-    recoveryInput.focus();
+  doLogin(key, prof);
+}
+
+// --- Create account ---
+function signup() {
+  const name = suName.value.trim();
+  const username = suUser.value.trim();
+  const pass = suPass.value;
+  const pass2 = suPass2.value;
+  const backup = suBackup.value.trim();
+
+  if (!name || !username || !pass || !backup) {
+    setHint(signupHint, "Please fill in your name, username, password, and backup answer.");
     return;
   }
-  // Correct! Let them set a fresh passcode.
-  const np = prompt("Backup answer correct! Set a NEW passcode (or leave blank for none):");
-  if (np === null) return; // cancelled
-  prof.pass = np ? hash(np) : "";
+  if (pass.length < 4) {
+    setHint(signupHint, "Password should be at least 4 characters.");
+    return;
+  }
+  if (pass !== pass2) {
+    setHint(signupHint, "The two passwords don't match.");
+    return;
+  }
+  const key = keyForUsername(username);
+  const profiles = loadProfiles();
+  if (profiles[key]) {
+    setHint(signupHint, "That username is taken. Pick another.");
+    return;
+  }
+  profiles[key] = {
+    name: name,
+    username: username,
+    pass: hash(pass),
+    recovery: hash(backup.toLowerCase()),
+  };
   saveProfiles(profiles);
-  currentKey = key;
-  currentName = prof.name;
-  try { localStorage.setItem(CURRENT_KEY, key); } catch (e) {}
-  startApp();
+  doLogin(key, profiles[key]);
 }
 
-// Wipe every account + checklist saved in this browser.
-function resetAllAccounts() {
-  if (!confirm("This deletes ALL accounts and checklists saved on this device. This cannot be undone. Continue?")) return;
-  try {
-    const toRemove = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (k && k.indexOf("wc-") === 0) toRemove.push(k);
-    }
-    toRemove.forEach((k) => localStorage.removeItem(k));
-  } catch (e) {}
-  currentKey = null;
-  currentName = "";
-  data = {};
-  appEl.hidden = true;
-  signinEl.hidden = false;
-  nameInput.value = "";
-  passInput.value = "";
-  recoveryInput.value = "";
-  showHint("All accounts on this device were reset. You can start fresh.", true);
-  nameInput.focus();
+// --- Forgot / reset password ---
+function resetPassword() {
+  const username = fgUser.value.trim();
+  const backup = fgBackup.value.trim();
+  const pass = fgPass.value;
+  const pass2 = fgPass2.value;
+
+  if (!username || !backup || !pass) {
+    setHint(forgotHint, "Fill in your username, backup answer, and a new password.");
+    return;
+  }
+  const key = keyForUsername(username);
+  const profiles = loadProfiles();
+  const prof = profiles[key];
+  if (!prof) {
+    setHint(forgotHint, "No account with that username.");
+    return;
+  }
+  if (prof.recovery !== hash(backup.toLowerCase())) {
+    setHint(forgotHint, "Backup answer doesn't match.");
+    return;
+  }
+  if (pass.length < 4) {
+    setHint(forgotHint, "New password should be at least 4 characters.");
+    return;
+  }
+  if (pass !== pass2) {
+    setHint(forgotHint, "The two passwords don't match.");
+    return;
+  }
+  prof.pass = hash(pass);
+  saveProfiles(profiles);
+  doLogin(key, prof);
 }
 
+// --- Sign out (with confirm) ---
 function signOut() {
+  if (!confirm("Sign out? Your checklist is saved and will be here when you log back in.")) return;
   try { localStorage.removeItem(CURRENT_KEY); } catch (e) {}
   currentKey = null;
   currentName = "";
   data = {};
   appEl.hidden = true;
   signinEl.hidden = false;
-  nameInput.value = "";
-  passInput.value = "";
-  recoveryInput.value = "";
-  showHint("");
-  nameInput.focus();
+  showView("login");
+  prefillLogin();
 }
 
+// --- Start app after login ---
 function startApp() {
   data = loadData(currentKey);
-  showHint("");
   signinEl.hidden = true;
   appEl.hidden = false;
   whoEl.textContent = "Signed in as " + currentName;
-
   const savedRecipient = localStorage.getItem(recipientKeyFor(currentKey));
   recipientEl.value = savedRecipient || "";
-
   render();
 }
 
@@ -408,12 +456,23 @@ function sendEmail() {
     });
 }
 
-// --- Wire up events ---
-signinBtn.addEventListener("click", signIn);
-forgotBtn.addEventListener("click", recoverAccess);
-resetAllBtn.addEventListener("click", resetAllAccounts);
-passInput.addEventListener("keydown", (e) => { if (e.key === "Enter") signIn(); });
-nameInput.addEventListener("keydown", (e) => { if (e.key === "Enter") passInput.focus(); });
+// --- Wire up sign-in events ---
+loginBtn.addEventListener("click", login);
+loginPass.addEventListener("keydown", (e) => { if (e.key === "Enter") login(); });
+loginUser.addEventListener("keydown", (e) => { if (e.key === "Enter") loginPass.focus(); });
+
+toSignup.addEventListener("click", () => showView("signup"));
+toForgot.addEventListener("click", () => showView("forgot"));
+toLoginFromSignup.addEventListener("click", () => showView("login"));
+toLoginFromForgot.addEventListener("click", () => showView("login"));
+
+signupBtn.addEventListener("click", signup);
+suBackup.addEventListener("keydown", (e) => { if (e.key === "Enter") signup(); });
+
+forgotResetBtn.addEventListener("click", resetPassword);
+fgPass2.addEventListener("keydown", (e) => { if (e.key === "Enter") resetPassword(); });
+
+// --- App events ---
 signoutBtn.addEventListener("click", signOut);
 resetBtn.addEventListener("click", clearAll);
 sendBtn.addEventListener("click", sendEmail);
@@ -432,5 +491,6 @@ sendBtn.addEventListener("click", sendEmail);
   }
   signinEl.hidden = false;
   appEl.hidden = true;
-  nameInput.focus();
+  showView("login");
+  prefillLogin();
 })();
